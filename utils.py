@@ -377,6 +377,40 @@ def bieos2ot(tag_sequence):
     return new_sequence
 
 
+def get_vocab_dep(train_set):
+    """
+    build the vocabulary of the whole dataset
+    :param train_set:
+    :param test_set:
+    :return:
+
+    ANIL: Helper function to deployment data set builder (without test set)
+    """
+    vocab = {'PUNCT': 0, 'PADDING': 1}
+    inv_vocab = {0: 'PUNCT', 1: 'PADDING'}
+    wid = 2
+    for record in train_set:
+        assert 'words' in record
+        words = record['words']
+        for w in words:
+            if w not in vocab:
+                vocab[w] = wid
+                inv_vocab[wid] = w
+                wid += 1
+    print("Find %s different words in the dataset" % len(vocab))
+    char_string = ''
+    for w in vocab:
+        char_string += w
+    chars = list(set(char_string))
+    cid, char_vocab = 0, {}
+    for ch in chars:
+        if ch not in char_vocab:
+            char_vocab[ch] = cid
+            cid += 1
+    print("Find %s different chars in the dataset" % len(char_vocab))
+    return vocab, char_vocab
+
+
 def get_vocab(train_set, test_set):
     """
     build the vocabulary of the whole dataset
@@ -622,6 +656,52 @@ def set_lm_labels(dataset, vocab, stm_lex, stm_win=3):
                 stm_lm_labels.append(0)
         dataset[i]['stm_lm_labels'] = stm_lm_labels.copy()
     return dataset
+
+
+def build_deployment_dataset(ds_name, input_win=1, tagging_schema='BIO', stm_win=1):
+    """
+    build dataset for model training, development and inference
+    :param ds_name: dataset name
+    :param input_win: window size input
+    :param tagging_schema: tagging schema
+    :param stm_win: window size of context for the OE component
+    :return:
+
+    ANIL: Does not create test set, used for final deployment model in sec19 experiments
+    """
+    # read mpqa sentiment lexicon
+    stm_lex = read_lexicon()
+    # paths of training dataset
+    train_path = './data/%s_train.txt' % ds_name
+    # loaded datasets
+    train_set = read_data(path=train_path)
+
+    vocab, char_vocab = get_vocab_dep(train_set=train_set)
+    train_set = set_wid(dataset=train_set, vocab=vocab, win=input_win)
+    train_set = set_cid(dataset=train_set, char_vocab=char_vocab)
+
+    train_set, ote_tag_vocab, ts_tag_vocab = set_labels(dataset=train_set, tagging_schema=tagging_schema)
+
+    train_set = set_lm_labels(dataset=train_set, vocab=vocab, stm_lex=stm_lex, stm_win=stm_win)
+
+    n_train = len(train_set)
+    # use 10% training data for dev experiment
+    n_val = int(n_train * 0.1)
+    # generate a uniform random sample from np.range(n_train) of size n_val
+    # This is equivalent to np.random.permutation(np.arange(n_train))[:n_val]
+    
+    val_sample_ids = np.random.choice(n_train, n_val, replace=False)
+    print("The first 15 validation samples:", val_sample_ids[:15])
+    val_set, tmp_train_set = [], []
+    for i in range(n_train):
+        record = train_set[i]
+        if i in val_sample_ids:
+            val_set.append(record)
+        else:
+            tmp_train_set.append(record)
+    train_set = [r for r in tmp_train_set]
+
+    return train_set, val_set, vocab, char_vocab, ote_tag_vocab, ts_tag_vocab
 
 
 def build_dataset(ds_name, input_win=1, tagging_schema='BIO', stm_win=1):

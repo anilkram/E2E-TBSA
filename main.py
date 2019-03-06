@@ -15,7 +15,7 @@ def run(dataset, model, params):
     :param params: settings of hyper-parameter
     :return:
     """
-    train_set, val_set, test_set = dataset
+    train_set, val_set = dataset
     n_train = len(train_set)
     best_val_ote_score, best_val_ts_score = -999.0, -999.0
     best_pred_ote, best_pred_ts = [], []
@@ -88,72 +88,22 @@ def run(dataset, model, params):
             print("\tval performance: ts: precision: %.4f, recall: %.4f, micro-f1: %.4f"
                   % (val_ts_micro_p, val_ts_micro_r, val_ts_micro_f1))
         if val_ts_micro_f1 > best_val_ts_score:
-            best_val_ts_score = val_ts_micro_f1
-            test_outputs = model.predict(dataset=test_set)
-            test_ote_scores, test_ts_scores = test_outputs[0], test_outputs[1]
-            if len(test_outputs) > 2:
-                best_pred_ote, best_pred_ts = test_outputs[2], test_outputs[3]
+            best_val_ote_scores = val_ote_scores
+            best_val_ts_scores = val_ts_scores
             best_iter = n_iter + 1
-            if test_ote_scores:
-                print("\tExceed: test performance: ote: f1: %.4f, ts: precision: %.4f, recall: %.4f, micro-f1: %.4f" % (test_ote_scores[2], test_ts_scores[1], test_ts_scores[2], test_ts_scores[3]))
-            else:
-                print("\tExceed: test performance: ts: precision: %.4f, recall: %.4f, micro-f1: %.4f"
-                      % (test_ts_scores[1], test_ts_scores[2], test_ts_scores[3]))
-            model_path = './models/%s_%.6lf.model' % (params.ds_name, test_ts_scores[3])
-            print("Save the model to %s..." % model_path)
+            model_path = './models/%s_%.6lf.model' % (params.ds_name, best_val_ts_scores[3])
+            print("Validation score exceeded, saving the model to %s..." % model_path)
             if not os.path.exists('./models'):
                 os.mkdir('./models')
             model.pc.save(model_path)
-    if test_ote_scores:
-        final_res_string = "\nBest results obtained at %s: ote f1: %.4f, ts: precision: %.4f, recall: %.4f, " \
-                           "ts micro-f1: %.4f" % (best_iter, test_ote_scores[2], test_ts_scores[1],
-                                                  test_ts_scores[2], test_ts_scores[3])
+    if val_ote_scores:
+        final_res_string = "\nBest val results obtained at %s: ote f1: %.4f, ts: precision: %.4f, recall: %.4f, " \
+                           "ts micro-f1: %.4f" % (best_iter, best_val_ote_scores[2], best_val_ts_scores[1],
+                                                  best_val_ts_scores[2], best_val_ts_scores[3])
     else:
         final_res_string = "\nBest results obtained at %s, ts: precision: %.4f, recall: %.4f, " \
-                           "ts micro-f1: %.4f" % (best_iter, test_ts_scores[1],
-                                                  test_ts_scores[2], test_ts_scores[3])
-    if best_pred_ote:
-        n_sample = len(test_set)
-        gold_ote = [x['ote_tags'] for x in test_set]
-        gold_ts = [x['ts_tags'] for x in test_set]
-        if model.tagging_schema == 'BIO':
-            gold_ote, gold_ts = bio2ot_batch(
-                ote_tags=gold_ote, ts_tags=gold_ts)
-            gold_ote, gold_ts = ot2bieos_batch(
-                ote_tags=gold_ote, ts_tags=gold_ts)
-        elif model.tagging_schema == 'OT':
-            gold_ote, gold_ts = ot2bieos_batch(
-                ote_tags=gold_ote, ts_tags=gold_ts)
-        output_lines = ['Dataset: %s\n' % params.ds_name, 'Parameter settings: \n']
-        params_dict = vars(params)
-        for k in params_dict:
-            if k == 'char_vocab' or k == 'vocab':
-                continue
-            else:
-                v = params_dict[k]
-                output_lines.append('\t%s: %s\n' % (k, v))
-        output_lines.append("==============================================\n\n")
-        for i in range(n_sample):
-            ote_seq = best_pred_ote[i]
-            ts_seq = best_pred_ts[i]
-            w_seq = test_set[i]['words']
-            ote_seq_gold = gold_ote[i]
-            ts_seq_gold = gold_ts[i]
-            assert len(ote_seq) == len(ts_seq) == len(w_seq)
-            for j in range(len(ote_seq)):
-                word = w_seq[j]
-                ote_tag = ote_seq[j]
-                ote_tag_gold = ote_seq_gold[j]
-                ts_tag = ts_seq[j]
-                ts_tag_gold = ts_seq_gold[j]
-                output_lines.append('%s\t%s\t%s\t%s\t%s\n' % (word, ote_tag, ote_tag_gold, ts_tag, ts_tag_gold))
-            # use empty lines as the separator
-            output_lines.append('\n')
-        if not os.path.exists('./predictions'):
-            os.mkdir('./predictions')
-        model_path = './predictions/%s_%.6lf.txt' % (params.ds_name, test_ts_scores[3])
-        with open(model_path, 'w+') as fp:
-            fp.writelines(output_lines)
+                           "ts micro-f1: %.4f" % (best_iter, best_val_ts_scores[1],
+                                                  best_val_ts_scores[2], best_val_ts_scores[3])
     print(final_res_string)
     return final_res_string, model_path
 
@@ -163,7 +113,7 @@ if __name__ == '__main__':
     # random.seed(random_seed)
 
     parser = argparse.ArgumentParser(description="Open Domain ABSA")
-    parser.add_argument("-ds_name", type=str, default='rest14', help="dataset name")
+    parser.add_argument("-ds_name", type=str, default='twitter', help="dataset name")
     # dimension of LSTM hidden representations
     parser.add_argument("-dim_char", type=int, default=30, help="dimension of char embeddings")
     parser.add_argument("-dim_char_h", type=int, default=50, help="dimension of char hidden representations")
@@ -171,12 +121,12 @@ if __name__ == '__main__':
     parser.add_argument("-dim_ts_h", type=int, default=50, help="hidden dimension for targeted sentiment")
     parser.add_argument("-input_win", type=int, default=3, help="window size of input")
     parser.add_argument("-stm_win", type=int, default=3, help="window size of OE component")
-    parser.add_argument("-optimizer", type=str, default="sgd", help="optimizer (or, trainer)")
-    parser.add_argument("-n_epoch", type=int, default=40, help="number of training epoch")
+    parser.add_argument("-optimizer", type=str, default="adam", help="optimizer (or, trainer)")
+    parser.add_argument("-n_epoch", type=int, default=50, help="number of training epoch")
     parser.add_argument("-dropout", type=float, default=0.5, help="dropout rate for final representations")
     parser.add_argument("-emb_name", type=str, default="glove_840B", help="name of word embedding")
     # Note: tagging schema is OT in the original data record
-    parser.add_argument("-tagging_schema", type=str, default="BIO", help="tagging schema")
+    parser.add_argument("-tagging_schema", type=str, default="BIEOS", help="tagging schema")
     parser.add_argument("-rnn_type", type=str, default="LSTM",
                         help="type of rnn unit, currently only LSTM and GRU are supported")
     parser.add_argument("-sgd_lr", type=float, default=0.1,
@@ -184,7 +134,7 @@ if __name__ == '__main__':
     parser.add_argument("-clip_grad", type=float, default=5.0, help="maximum gradients")
     parser.add_argument("-lr_decay", type=float, default=0.05, help="decay rate of learning rate")
     parser.add_argument("-use_char", type=int, default=0, help="if use character-level word embeddings")
-    parser.add_argument('-epsilon', type=float, default=0.5, help="maximum proportions of the boundary-based scores")
+    parser.add_argument('-epsilon', type=float, default=0.8, help="maximum proportions of the boundary-based scores")
     dy_seed = 1314159
     random_seed = 1234
     #random_seed = 1972
@@ -199,9 +149,9 @@ if __name__ == '__main__':
     emb_name = args.emb_name
 
     emb2path = {
-        'glove_6B': '/projdata9/info_fil/lixin/Research/OTE/embeddings/glove_6B_300d.txt',
-        'glove_42B': '/projdata9/info_fil/lixin/Research/OTE/embeddings/glove_42B_300d.txt',
-        'glove_840B': '/projdata9/info_fil/lixin/Research/OTE/embeddings/glove_840B_300d.txt',
+        'glove_6B': '/Users/corpora/Glove/orig/glove.6B.300d.txt',
+        'glove_42B': '/Users/corpora/Glove/orig/glove.42B.300d.txt',
+        'glove_840B': '/Users/corpora/Glove/orig/glove.840B.300d.txt',
         'glove_27B100d': '/projdata9/info_fil/lixin/Research/OTE/embeddings/glove_twitter_27B_100d.txt',
         'glove_27B200d': '/projdata9/info_fil/lixin/Research/OTE/embeddings/glove_twitter_27B_200d.txt',
         'yelp_rest1': '/projdata9/info_fil/lixin/Research/yelp/yelp_vec_200_2_win5_sent.txt',
@@ -217,7 +167,7 @@ if __name__ == '__main__':
     tagging_schema = args.tagging_schema
 
     # build dataset
-    train, val, test, vocab, char_vocab, ote_tag_vocab, ts_tag_vocab = build_dataset(
+    train, val, vocab, char_vocab, ote_tag_vocab, ts_tag_vocab = build_deployment_dataset(
         ds_name=ds_name, input_win=input_win,
         tagging_schema=tagging_schema, stm_win=stm_win
     )
@@ -254,7 +204,7 @@ if __name__ == '__main__':
 
     mode = 'train-test'
     if mode == 'train-test':
-        final_res_string, model_path = run(dataset=[train, val, test], model=model, params=args)
+        final_res_string, model_path = run(dataset=[train, val], model=model, params=args)
         log_lines.append(final_res_string + "\n")
         log_lines.append("Best model is saved at: %s\n" % model_path)
         log_lines.append(separator + "\n\n")
